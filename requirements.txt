@@ -1,0 +1,11 @@
+streamlit
+streamlit-mic-recorder
+google-generativeai
+pandas
+requests
+matplotlib
+Pillow
+whisper
+torch==2.0.1
+streamlit-webrtc
+plotly
