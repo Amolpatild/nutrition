@@ -5,3 +5,5 @@ matplotlib
 plotly
 google-generativeai
 SpeechRecognition
+streamlit-webrtc
+

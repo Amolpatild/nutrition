@@ -1,19 +1,19 @@
-#Import all the necessay pacakges
 import streamlit as st
 import pandas as pd
 import requests
 import re
 import matplotlib.pyplot as plt
+import plotly.express as px
 import speech_recognition as sr
 import google.generativeai as genai
 from datetime import datetime
-import plotly.express as px
 from PIL import Image
+import tempfile
 
 # -----------------------------
 # CONFIG
 # -----------------------------
-st.set_page_config(page_title="The Smartest AI Nutrition Assistant", layout="wide")
+st.set_page_config(page_title="AI Nutrition Assistant", layout="wide")
 
 # -----------------------------
 # API KEYS
@@ -29,13 +29,9 @@ model = genai.GenerativeModel("gemini-2.5-flash-preview-04-17")
 # -----------------------------
 if "calorie_log" not in st.session_state:
     st.session_state.calorie_log = pd.DataFrame(columns=["Date", "Meal", "Food", "Calories"])
-if "image_analysis_result" not in st.session_state:
-    st.session_state.image_analysis_result = ""
-if "coach_response" not in st.session_state:
-    st.session_state.coach_response = ""
 
 # -----------------------------
-# fetch_calories FUNCTION-Let's fetch the real time calories from NUTRITIONIX_APP
+# FUNCTIONS
 # -----------------------------
 def fetch_calories(food_item):
     url = "https://trackapi.nutritionix.com/v2/natural/nutrients"
@@ -52,9 +48,7 @@ def fetch_calories(food_item):
             calories = result["foods"][0]["nf_calories"]
             return float(calories)
     return None
-# -----------------------------
-# log_meal FUNCTION-Let's fetch the real time calories from NUTRITIONIX_APP and store it in the dataframe
-# -----------------------------
+
 def log_meal(food_item, meal_type):
     calories = fetch_calories(food_item)
     if calories is None:
@@ -68,31 +62,23 @@ def log_meal(food_item, meal_type):
     st.session_state.calorie_log = pd.concat([st.session_state.calorie_log, new_entry], ignore_index=True)
     return f"✅ Logged: {food_item} ({meal_type}) = {calories} kcal."
 
-# -----------------------------
-# get_summary FUNCTION-Let's summrize calories and calculate the total calories
-# -----------------------------
 def get_summary():
     if st.session_state.calorie_log.empty:
         return "No meals logged yet."
     df = st.session_state.calorie_log
     summary = df.groupby("Meal")["Calories"].sum()
     total = summary.sum()
-    text = "\n".join([f"{meal}: {cal:.2f} kcal" for meal, cal in summary.items()])
-    return f"### Summary\n{text}\n\n**Total Calories:** {total:.2f} kcal"
+    text = "\n".join([f"**{meal}**: {cal} kcal" for meal, cal in summary.items()])
+    return f"#### Summary\n{text}\n\n**Total Calories:** {total} kcal"
 
-# -----------------------------
-# plot_bar_chart FUNCTION- To plot the bar graph for better visulization.
-# -----------------------------
 def plot_bar_chart():
     if st.session_state.calorie_log.empty:
         return
     chart_data = st.session_state.calorie_log.groupby("Meal")["Calories"].sum().reset_index()
-    fig = px.bar(chart_data, x="Meal", y="Calories", color="Meal", title="Meal-wise Calorie Breakdown")
-    st.plotly_chart(fig)
+    fig = px.bar(chart_data, x="Meal", y="Calories", title="Calories per Meal", color="Meal", text="Calories")
+    fig.update_traces(textposition='outside')
+    st.plotly_chart(fig, use_container_width=True)
 
-# -----------------------------
-# transcribe_audio FUNCTION- To recognize the voice
-# -----------------------------
 def transcribe_audio():
     recognizer = sr.Recognizer()
     with sr.Microphone() as source:
@@ -104,9 +90,6 @@ def transcribe_audio():
     except:
         return "❌ Could not recognize speech."
 
-# -----------------------------
-# suggest_meal FUNCTION- To suggest the remaining calories food.
-# -----------------------------
 def suggest_meal(remaining_calories):
     try:
         cal = int(remaining_calories)
@@ -116,46 +99,30 @@ def suggest_meal(remaining_calories):
     except:
         return "⚠️ Enter a valid calorie number."
 
-# -----------------------------
-# generate_meal_plan FUNCTION- To generate the persionalize food plan.
-# -----------------------------
 def generate_meal_plan(age, gender, goal, allergies, preferences, medical, cultural, lifestyle):
-    prompt = f"""Create a personalized Indian meal plan with three meals for:
-- Age: {age}
-- Gender: {gender}
-- Goal: {goal}
-- Allergies: {allergies}
-- Preferences: {preferences}
-- Medical Conditions: {medical}
-- Cultural Background: {cultural}
-- Lifestyle: {lifestyle}
+    prompt = f"""Create a personalized Indian meal plan with three meals for:\n
+**Age**: {age}\n**Gender**: {gender}\n**Goal**: {goal}\n**Allergies**: {allergies}\n**Preferences**: {preferences}\n**Medical Conditions**: {medical}\n**Cultural Background**: {cultural}\n**Lifestyle**: {lifestyle}\n
 Format using Breakfast, Lunch, Dinner."""
     response = model.generate_content(prompt)
-    return response.text.replace("**", "")  # Remove asterisks
+    return response.text
 
-# -----------------------------
-# chat_with_coach FUNCTION- To discuss the any queey regarding the nutrition.
-# -----------------------------
 def chat_with_coach(query):
     prompt = f"As a certified nutritionist, answer this: {query}"
     response = model.generate_content(prompt)
     return response.text
 
-# -----------------------------
-# analyze_food_image FUNCTION- To anyze the ingredients nutrition informatin by uploading image.
-# -----------------------------
-def analyze_food_image(uploaded_file):
-    try:
-        image = Image.open(uploaded_file)
-        response = model.generate_content(["Estimate nutrients and identify food from this image:", image])
-        return response.text
-    except Exception as e:
-        return f"Image analysis failed: {str(e)}"
+def analyze_food_image(image):
+    image_path = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+    image.save(image_path.name)
+    with open(image_path.name, "rb") as f:
+        image_bytes = f.read()
+    response = model.generate_content(["Estimate nutrients and identify food from this image:", image_bytes])
+    return response.text
 
 # -----------------------------
 # UI LAYOUT
 # -----------------------------
-st.title("🥗 The Smartest AI Nutrition Assistant ")
+st.title("🥗 AI Nutrition Assistant")
 st.markdown("### Powered by Gemini, Nutritionix & Streamlit")
 
 with st.sidebar:
@@ -169,7 +136,7 @@ with st.sidebar:
     st.divider()
 
     st.header("🎤 Voice Logging")
-    if st.button("Record Voice"):
+    if st.button("Record Voice Meal"):
         transcribed = transcribe_audio()
         st.info(f"Transcribed: {transcribed}")
         if transcribed:
@@ -178,53 +145,33 @@ with st.sidebar:
 
     st.divider()
 
+    st.header("🖼️ Upload Food Image")
+    uploaded_image = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png"])
+    if uploaded_image and st.button("Analyze Image"):
+        img = Image.open(uploaded_image)
+        st.image(img, caption="Uploaded Image", use_column_width=True)
+        response = analyze_food_image(img)
+        st.session_state["image_analysis"] = response
+
+    st.divider()
+
+    st.header("🧠 Ask Nutrition Coach")
+    if st.button("🎤 Ask with Voice"):
+        coach_voice = transcribe_audio()
+        st.session_state.coach_query = coach_voice
+
+    coach_query = st.text_input("Your Question", key="coach_query")
+    if st.button("Ask"):
+        answer = chat_with_coach(coach_query)
+        st.session_state.coach_response = answer
+
+    st.divider()
+
     st.header("💡 Suggest Meal")
     remaining_cal = st.text_input("Remaining Calories")
     if st.button("Suggest"):
         suggestion = suggest_meal(remaining_cal)
         st.session_state["suggestion"] = suggestion
-
-    st.divider()
-
-    st.markdown("### 🧑‍⚕️ Ask Nutrition Coach")
-
-    # Use a temporary variable for voice transcription
-    if "transcribed_coach_question" not in st.session_state:
-        st.session_state.transcribed_coach_question = ""
-
-    # Layout for input
-    col1, col2 = st.columns([3, 1])
-
-    with col1:
-        # Use the voice transcription as default text input
-        coach_input = st.text_area("Type your question or use voice", value=st.session_state.transcribed_coach_question, key="coach_input",height=100)
-
-    with col2:
-        if st.button("🎤 Voice Input"):
-            transcribed = transcribe_audio()
-            if transcribed and "could not recognize" not in transcribed.lower():
-                st.session_state.transcribed_coach_question = transcribed
-                st.rerun()
-            else:
-                st.warning("Could not recognize speech.")
-
-    # Ask button logic
-    if st.button("Ask Coach"):
-        query = coach_input.strip()
-        if query:
-            st.session_state["coach"] = chat_with_coach(query)
-        else:
-            st.warning("Please enter a question or use voice.")
-
-
-    st.divider()
-
-    st.header("📸 Image Analysis")
-    uploaded_image = st.file_uploader("Upload Food Image", type=["jpg", "jpeg", "png"])
-    if uploaded_image and st.button("Analyze Image"):
-        with st.spinner("Analyzing image..."):
-            result = analyze_food_image(uploaded_image)
-            st.session_state["image_analysis_result"] = result
 
     st.divider()
 
@@ -241,8 +188,6 @@ with st.sidebar:
         plan = generate_meal_plan(age, gender, goal, allergies, preferences, medical, cultural, lifestyle)
         st.session_state["plan"] = plan
 
-
-
 # -----------------------------
 # MAIN OUTPUT SECTION
 # -----------------------------
@@ -253,24 +198,18 @@ with st.container():
     st.markdown(get_summary())
     plot_bar_chart()
 
-    if st.session_state.get("suggestion"):
+    if "image_analysis" in st.session_state:
+        st.markdown("#### 📷 Image Analysis")
+        st.info(st.session_state.image_analysis)
+
+    if "suggestion" in st.session_state:
         st.markdown("#### 🍱 Suggested Meal")
-        st.info(st.session_state["suggestion"])
+        st.info(st.session_state.suggestion)
 
-    if st.session_state.get("coach_response"):
+    if "coach_response" in st.session_state:
         st.markdown("#### 🧑‍⚕️ Nutrition Coach Says")
-        st.success(st.session_state["coach_response"])
+        st.success(st.session_state.coach_response)
 
-    if st.session_state.get("image_analysis_result"):
-        st.markdown("#### 🖼️ Image Analysis Result")
-        st.success(st.session_state["image_analysis_result"])
-
-    if "coach" in st.session_state and st.session_state.coach:
-            st.markdown("#### 🧑‍⚕️ Nutrition Coach Says")
-            st.success(st.session_state["coach"])
-
-    if st.session_state.get("plan"):
+    if "plan" in st.session_state:
         st.markdown("#### 🥗 Personalized Meal Plan")
-        st.text_area("Generated Plan", st.session_state["plan"], height=300)
-
-
+        st.markdown(st.session_state.plan)
